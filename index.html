@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web TTS Highlighter 🎙️</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #333;
+        }
+        .controls-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #dee2e6;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .control-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        button, input[type="file"], select {
+            padding: 8px 12px;
+            font-size: 1rem;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        #text-display {
+            white-space: pre-wrap; /* Keeps paragraph breaks */
+            font-size: 1.2rem;
+            line-height: 1.6;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            min-height: 300px;
+            background: #fff;
+        }
+        .highlight {
+            background-color: #ffe066;
+            color: black;
+            border-radius: 3px;
+            padding: 2px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Text-to-Speech Highlighter</h1>
+
+    <div class="controls-card">
+        <div class="control-row">
+            <label><strong>Load .txt File:</strong></label>
+            <input type="file" id="file-input" accept=".txt">
+        </div>
+
+        <div class="control-row">
+            <label><strong>Voice:</strong></label>
+            <select id="voice-select" style="flex-grow: 1;"></select>
+        </div>
+
+        <div class="control-row">
+            <label><strong>Speed:</strong> <span id="speed-val">1.0</span>x</label>
+            <input type="range" id="rate-slider" min="0.5" max="2" value="1" step="0.1">
+
+            <label><strong>Volume:</strong> <span id="vol-val">100</span>%</label>
+            <input type="range" id="volume-slider" min="0" max="1" value="1" step="0.1">
+        </div>
+
+        <div class="control-row">
+            <button id="play-btn" disabled>Play</button>
+            <button id="stop-btn" disabled>Stop</button>
+        </div>
+    </div>
+
+    <div id="text-display">Upload a text file to begin reading...</div>
+
+    <script>
+        // DOM Elements
+        const fileInput = document.getElementById('file-input');
+        const voiceSelect = document.getElementById('voice-select');
+        const rateSlider = document.getElementById('rate-slider');
+        const speedVal = document.getElementById('speed-val');
+        const volumeSlider = document.getElementById('volume-slider');
+        const volVal = document.getElementById('vol-val');
+        const playBtn = document.getElementById('play-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const textDisplay = document.getElementById('text-display');
+
+        // State variables
+        let synth = window.speechSynthesis;
+        let voices = [];
+        let rawText = "";
+        let currentUtterance = null;
+
+        // --- Populate Voices ---
+        function populateVoices() {
+            voices = synth.getVoices();
+            voiceSelect.innerHTML = '';
+            voices.forEach((voice, i) => {
+                const option = document.createElement('option');
+                option.textContent = `${voice.name} (${voice.lang})`;
+                option.value = i;
+                voiceSelect.appendChild(option);
+            });
+        }
+        
+        // Browsers load voices asynchronously, so we need this event listener
+        populateVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = populateVoices;
+        }
+
+        // --- File Upload Handling ---
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                rawText = e.target.result;
+                textDisplay.textContent = rawText; // Display raw text
+                playBtn.disabled = false;
+                stopBtn.disabled = false;
+            };
+            reader.readAsText(file);
+        });
+
+        // --- Update UI Sliders ---
+        rateSlider.addEventListener('input', () => speedVal.textContent = rateSlider.value);
+        volumeSlider.addEventListener('input', () => volVal.textContent = Math.round(volumeSlider.value * 100));
+
+        // --- Speech and Highlighting Logic ---
+        playBtn.addEventListener('click', () => {
+            if (synth.speaking) synth.cancel(); // Stop current speech if any
+
+            if (rawText.trim() === '') return;
+
+            currentUtterance = new SpeechSynthesisUtterance(rawText);
+            
+            // Apply settings
+            const selectedVoiceIndex = voiceSelect.value;
+            currentUtterance.voice = voices[selectedVoiceIndex];
+            currentUtterance.rate = rateSlider.value;
+            currentUtterance.volume = volumeSlider.value;
+
+            // The Magic: Listen for word boundaries to highlight text
+            currentUtterance.onboundary = (event) => {
+                if (event.name === 'word') {
+                    const charIndex = event.charIndex;
+                    
+                    // Find the end of the current word by looking for the next space or line break
+                    // We use a regex to find the next whitespace character
+                    let nextSpace = rawText.substring(charIndex).search(/\s/);
+                    if (nextSpace === -1) {
+                        nextSpace = rawText.length; // If it's the last word
+                    } else {
+                        nextSpace += charIndex; 
+                    }
+
+                    // Slice the string into three parts: Before word, The Word, After word
+                    const before = rawText.slice(0, charIndex);
+                    const word = rawText.slice(charIndex, nextSpace);
+                    const after = rawText.slice(nextSpace);
+
+                    // Rebuild the HTML with a span wrapping the current word
+                    textDisplay.innerHTML = before + `<span class="highlight">${word}</span>` + after;
+                }
+            };
+
+            // Clear formatting when finished
+            currentUtterance.onend = () => {
+                textDisplay.textContent = rawText;
+            };
+
+            synth.speak(currentUtterance);
+        });
+
+        stopBtn.addEventListener('click', () => {
+            synth.cancel();
+            textDisplay.textContent = rawText; // Reset text
+        });
+    </script>
+</body>
+</html>
