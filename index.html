@@ -5,12 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web TTS Highlighter 🎙️</title>
     <style>
+        /* Base / Light Mode Styles */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
             margin: 2rem auto;
             padding: 0 1rem;
             color: #333;
+            background-color: #fff;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .controls-card {
             background: #f8f9fa;
@@ -21,6 +29,7 @@
             display: flex;
             flex-direction: column;
             gap: 15px;
+            transition: background-color 0.3s, border-color 0.3s;
         }
         .control-row {
             display: flex;
@@ -33,6 +42,7 @@
             font-size: 1rem;
             border-radius: 5px;
             border: 1px solid #ccc;
+            transition: background-color 0.3s, color 0.3s;
         }
         button {
             background-color: #007bff;
@@ -44,194 +54,12 @@
         button:hover { background-color: #0056b3; }
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         
+        #dark-mode-btn {
+            background-color: #333;
+            color: #fff;
+        }
+        #dark-mode-btn:hover { background-color: #555; }
+
         #text-display {
             white-space: pre-wrap;
-            font-size: 1.2rem;
-            line-height: 1.6;
-            padding: 20px;
-            border: 1px solid #dee2e6;
-            border-radius: 10px;
-            min-height: 300px;
-            background: #fff;
-        }
-        .highlight {
-            background-color: #ffe066;
-            color: black;
-            border-radius: 3px;
-            padding: 2px 0;
-        }
-    </style>
-</head>
-<body>
-
-    <h1>Text-to-Speech Highlighter</h1>
-
-    <div class="controls-card">
-        <div class="control-row">
-            <label><strong>Load .txt File:</strong></label>
-            <input type="file" id="file-input" accept=".txt">
-        </div>
-
-        <div class="control-row">
-            <label><strong>Voice:</strong></label>
-            <select id="voice-select" style="flex-grow: 1;"></select>
-        </div>
-
-        <div class="control-row">
-            <label><strong>Speed:</strong> <span id="speed-val">1.0</span>x</label>
-            <input type="range" id="rate-slider" min="0.5" max="2" value="1" step="0.1">
-
-            <label><strong>Volume:</strong> <span id="vol-val">100</span>%</label>
-            <input type="range" id="volume-slider" min="0" max="1" value="1" step="0.1">
-        </div>
-
-        <div class="control-row">
-            <button id="play-btn" disabled>Play from Start</button>
-            <button id="stop-btn" disabled>Stop</button>
-        </div>
-    </div>
-
-    <div id="text-display">Upload a text file to begin reading...</div>
-
-    <script>
-        const fileInput = document.getElementById('file-input');
-        const voiceSelect = document.getElementById('voice-select');
-        const rateSlider = document.getElementById('rate-slider');
-        const speedVal = document.getElementById('speed-val');
-        const volumeSlider = document.getElementById('volume-slider');
-        const volVal = document.getElementById('vol-val');
-        const playBtn = document.getElementById('play-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        const textDisplay = document.getElementById('text-display');
-
-        let synth = window.speechSynthesis;
-        let voices = [];
-        let rawText = "";
-        let currentUtterance = null;
-        
-        // New State Variables for Tracking
-        let globalOffset = 0;      // Tracks where we are in the total text
-        let currentLocalIndex = 0; // Tracks the current word within the active audio chunk
-        let isPlaying = false;
-        let isAdjusting = false;   // Prevents the app from resetting when we swap settings
-
-        function populateVoices() {
-            voices = synth.getVoices();
-            voiceSelect.innerHTML = '';
-            voices.forEach((voice, i) => {
-                const option = document.createElement('option');
-                option.textContent = `${voice.name} (${voice.lang})`;
-                option.value = i;
-                voiceSelect.appendChild(option);
-            });
-        }
-        
-        populateVoices();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = populateVoices;
-        }
-
-        fileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                stopBtn.click(); // Reset everything if a new file is loaded
-                rawText = e.target.result;
-                textDisplay.textContent = rawText;
-                playBtn.disabled = false;
-                stopBtn.disabled = false;
-            };
-            reader.readAsText(file);
-        });
-
-        // Update UI Text immediately while dragging
-        rateSlider.addEventListener('input', () => speedVal.textContent = rateSlider.value);
-        volumeSlider.addEventListener('input', () => volVal.textContent = Math.round(volumeSlider.value * 100));
-
-        // --- Core Speech Function ---
-        function speakFrom(offset) {
-            if (synth.speaking) synth.cancel();
-
-            const textChunk = rawText.substring(offset);
-            if (textChunk.trim() === '') return;
-
-            currentUtterance = new SpeechSynthesisUtterance(textChunk);
-            currentUtterance.voice = voices[voiceSelect.value];
-            currentUtterance.rate = parseFloat(rateSlider.value);
-            currentUtterance.volume = parseFloat(volumeSlider.value);
-
-            currentUtterance.onboundary = (event) => {
-                if (event.name === 'word') {
-                    currentLocalIndex = event.charIndex;
-                    const absoluteIndex = offset + currentLocalIndex;
-
-                    let nextSpace = rawText.substring(absoluteIndex).search(/\s/);
-                    if (nextSpace === -1) nextSpace = rawText.length;
-                    else nextSpace += absoluteIndex;
-
-                    const before = rawText.slice(0, absoluteIndex);
-                    const word = rawText.slice(absoluteIndex, nextSpace);
-                    const after = rawText.slice(nextSpace);
-
-                    textDisplay.innerHTML = before + `<span class="highlight">${word}</span>` + after;
-                }
-            };
-
-            currentUtterance.onend = () => {
-                // Only reset the text if we finished naturally, not if we were adjusting sliders
-                if (!isAdjusting) {
-                    textDisplay.textContent = rawText;
-                    isPlaying = false;
-                    globalOffset = 0;
-                    currentLocalIndex = 0;
-                }
-            };
-
-            synth.speak(currentUtterance);
-            isPlaying = true;
-        }
-
-        // --- Play / Stop Buttons ---
-        playBtn.addEventListener('click', () => {
-            globalOffset = 0;
-            currentLocalIndex = 0;
-            isAdjusting = false;
-            speakFrom(0);
-        });
-
-        stopBtn.addEventListener('click', () => {
-            isAdjusting = false;
-            isPlaying = false;
-            synth.cancel();
-            textDisplay.textContent = rawText;
-            globalOffset = 0;
-            currentLocalIndex = 0;
-        });
-
-        // --- The Magic: Live Adjustments ---
-        function applySettingsLive() {
-            if (isPlaying) {
-                isAdjusting = true; 
-                synth.cancel(); // Stop current playback
-                
-                // Save our exact character location
-                globalOffset += currentLocalIndex; 
-                currentLocalIndex = 0;
-                
-                // Give the browser 50 milliseconds to clear the old audio before restarting
-                setTimeout(() => {
-                    speakFrom(globalOffset);
-                    isAdjusting = false;
-                }, 50);
-            }
-        }
-
-        // We use 'change' instead of 'input' so it only restarts the audio when you let go of the slider
-        rateSlider.addEventListener('change', applySettingsLive);
-        volumeSlider.addEventListener('change', applySettingsLive);
-        voiceSelect.addEventListener('change', applySettingsLive); // Works for changing voices on the fly too!
-    </script>
-</body>
-</html>
+            font-size: 1.
